@@ -8,7 +8,11 @@ from datetime import datetime
 import discord
 from discord.ext import commands, tasks
 import re
+import logging
+import webserver
 
+logging.basicConfig(level=logging.INFO)  # or DEBUG for more detail
+logger = logging.getLogger(__name__)
 
 num_map = {
     "1": "first",
@@ -99,7 +103,6 @@ def updateMap(name,dmg,last_action,attacker_map):
     if dmg == 0:
         return False
     if name not in attacker_map:
-        print(f"⚠️ New attacker: {name}, damage={dmg}, last_action={last_action}")
         attacker_map[name] = {"damage": dmg, "last_action": last_action}
         return True
     else:
@@ -107,7 +110,6 @@ def updateMap(name,dmg,last_action,attacker_map):
         old_dmg = old["damage"]
         old_time = parse_time(old["last_action"])
         if dmg > old_dmg and new_time > old_time:
-            print(f"⚠️ Updated attacker: {name}, dmg {old_dmg}→{dmg}, last_action {old_time}→{last_action}")
             attacker_map[name] = {"damage": dmg, "last_action": last_action}
             return True
     return False
@@ -218,7 +220,7 @@ bot = commands.Bot(command_prefix="!",intents=intents)
 @tasks.loop(minutes=30)
 async def dungeon_task():
     global warnings
-    print("Running dungeon check...")
+    logger.info("Running dungeon check...")
     await run_task()
     for username in warnings:
         await issue_warning(username,warnings[username])
@@ -311,8 +313,8 @@ async def get_interval(ctx):
         await ctx.send("⚠️ The task is not currently running")
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
+    logger.info(f"Logged in as {bot.user}")
 
 
-
+webserver.keep_alive()
 bot.run(TOKEN)
