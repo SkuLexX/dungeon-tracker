@@ -138,6 +138,8 @@ def getAttackers(threshold_time_str,node_id,node_map,cube_id):
             match_map=node_map[match_no]
         else:
             match_map={}
+        if not data or not data.get("board"):
+            return
         for attacker in data.get("board").get("attackers", []):
             last_action_str = attacker.get("last_action_at")  # e.g., "2026-03-27 07:26:58"
             last_action_time = datetime.strptime(last_action_str, "%Y-%m-%d %H:%M:%S").time()
