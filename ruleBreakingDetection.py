@@ -63,6 +63,7 @@ match_number = {
 EMAIL = os.environ["EMAIL"]
 PASSWORD = os.environ["PASSWORD"]
 cookie_dict=json.loads(os.environ["COOKIES"])
+loop_time = int(os.environ["LOOP_TIME"]) or 10
 warnings = {}
 
 
@@ -219,7 +220,7 @@ intents.members=True
 
 bot = commands.Bot(command_prefix="!",intents=intents)
 
-@tasks.loop(minutes=30)
+@tasks.loop(minutes=loop_time)
 async def dungeon_task():
     global warnings
     logger.info("Running dungeon check...")
