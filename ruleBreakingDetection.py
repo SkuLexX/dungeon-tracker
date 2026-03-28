@@ -215,7 +215,7 @@ intents.members=True
 
 bot = commands.Bot(command_prefix="!",intents=intents)
 
-@tasks.loop(minutes=1)
+@tasks.loop(minutes=30)
 async def dungeon_task():
     global warnings
     print("Running dungeon check...")
@@ -288,9 +288,31 @@ async def get_node_times(ctx):
         message += f"• **{node_name} (ID: {node_id})** → `{time_value}`\n"
 
     await ctx.send(message)
+
+@bot.command()
+async def set_interval(ctx, minutes: int):
+    if minutes <= 0:
+        await ctx.send("❌ Interval must be > 0")
+        return
+
+    if dungeon_task.is_running():
+        dungeon_task.change_interval(minutes=minutes)
+    else:
+        await ctx.send(f"⏱️ Task must be running to change loop interval")
+
+    await ctx.send(f"⏱️ Loop interval set to {minutes} minute(s)")
+
+@bot.command()
+async def get_interval(ctx):
+    if dungeon_task.is_running():
+        interval_minutes = dungeon_task.minutes  # If your loop was defined with minutes
+        await ctx.send(f"⏱️ Current loop interval is {interval_minutes} minute(s)")
+    else:
+        await ctx.send("⚠️ The task is not currently running")
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
+
 
 
 bot.run(TOKEN)
