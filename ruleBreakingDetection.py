@@ -60,8 +60,6 @@ match_number = {
     "6":4,
     "11":1
 }
-EMAIL = os.environ["EMAIL"]
-PASSWORD = os.environ["PASSWORD"]
 cookie_dict=json.loads(os.environ["COOKIES"])
 loop_time = int(os.environ["LOOP_TIME"]) or 10
 warnings = {}
