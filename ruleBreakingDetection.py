@@ -156,7 +156,14 @@ def getAttackers(threshold_time_str,node_id,node_map,cube_id):
     
 
 
-
+def normalize_name(name: str) -> str:
+    # remove [demon] (any case)
+    name = re.sub(r"\[demon\]", "", name, flags=re.IGNORECASE)
+    
+    # normalize spaces
+    name = " ".join(name.split())
+    
+    return name.lower()  # optional for comparison
 
 async def run_task():
     global dungeon_map
@@ -190,11 +197,12 @@ async def issue_warning(username, msg):
     guild = bot.get_guild(GUILD_ID)
     channel = guild.get_channel(CHANNEL_ID)
 
-    discord_name =username
+    discord_name = normalize_name(username)
     user_id = None
     if discord_name:
         for member in guild.members:
             display_name = member.nick if member.nick else member.global_name or member.name
+            display_name = normalize_name(display_name)
             if display_name.lower() == discord_name.lower():
                 user_id = member.id
                 break
