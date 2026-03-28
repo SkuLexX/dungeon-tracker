@@ -1,8 +1,6 @@
 import requests
-from playwright.async_api import async_playwright
 from dotenv import load_dotenv
 import os
-import time
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
 import json
@@ -54,48 +52,14 @@ CUBE = "The Polyhedral Crucible"
 HARD = "Castle of the Fallen Prince"
 NORMAL = "Shadowbridge Warrens"
 
-WEBHOOK_URL = os.environ["WEBHOOK_URL"]
-
 match_number = {
     "6":4,
     "11":1
 }
 EMAIL = os.environ["EMAIL"]
 PASSWORD = os.environ["PASSWORD"]
-cookie_dict={}
-
+cookie_dict=json.loads(os.environ["COOKIES"])
 warnings = {}
-
-async def wait_for_cookies(context, timeout=5):
-    start = time.time()
-
-    while time.time() - start < timeout:
-        cookies =await context.cookies()
-        if cookies:
-            return
-        time.sleep(0.5)
-    raise Exception("Cookies not found")
-
-
-async def getCookies():
-    global cookie_dict
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context()
-        page = await context.new_page()
-
-        await page.goto("https://demonicscans.org/signin.php")
-
-        await page.fill('input[name="email"]', EMAIL)
-        await page.fill('input[name="password"]', PASSWORD)
-        await page.click('input[type="submit"]')
-
-        # wait for cookies (you need async version of your function)
-        await wait_for_cookies(context)
-
-        cookies = await context.cookies()
-        cookie_dict = {c["name"]: c["value"] for c in cookies}
-        await browser.close()
 
 
 def getDungeonId(dungeon,soup):
@@ -192,7 +156,6 @@ def getAttackers(threshold_time_str,node_id,node_map,cube_id):
 async def run_task():
     global dungeon_map
     global cookie_dict
-    await getCookies()
     url = "https://demonicscans.org/guild_dungeon.php"
     res = requests.get(url, cookies=cookie_dict)
     soup = BeautifulSoup(res.text, "html.parser")

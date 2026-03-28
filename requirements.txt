@@ -1,5 +1,4 @@
 requests
-playwright
 python-dotenv
 beautifulsoup4
 discord.py
