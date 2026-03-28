@@ -1,5 +1,5 @@
 import requests
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 from dotenv import load_dotenv
 import os
 import time
@@ -9,16 +9,27 @@ import sys
 import json
 from datetime import datetime
 import discord
-from discord.ext import commands
-import asyncio
+from discord.ext import commands, tasks
 
+num_map = {
+    "1": "first",
+    "2": "second",
+    "3": "third",
+    "4": "fourth"
+}
+
+node_names = {
+    "6": "second node",
+    "11": "last node",
+}
 
 if os.path.exists(".env"):
     load_dotenv()
+dungeon_map = {}
 
 TOKEN = os.environ["BOT_TOKEN"]
-GUILD_ID = 1487130013525610687  # your server ID
-CHANNEL_ID = 1487130014448226407  # channel to send warnings
+GUILD_ID  = None
+CHANNEL_ID = None
 
 
 CUBE = "The Polyhedral Crucible"
@@ -41,32 +52,37 @@ cookie_dict={}
 
 warnings = {}
 
-def wait_for_cookies(context, timeout=5):
+async def wait_for_cookies(context, timeout=5):
     start = time.time()
 
     while time.time() - start < timeout:
-        cookies = context.cookies()
+        cookies =await context.cookies()
         if cookies:
             return
         time.sleep(0.5)
     raise Exception("Cookies not found")
 
 
+async def getCookies():
+    global cookie_dict
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context()
+        page = await context.new_page()
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
-    page = browser.new_page()
+        await page.goto("https://demonicscans.org/signin.php")
 
-    page.goto("https://demonicscans.org/signin.php")
+        await page.fill('input[name="email"]', EMAIL)
+        await page.fill('input[name="password"]', PASSWORD)
+        await page.click('input[type="submit"]')
 
-    page.fill('input[name="email"]', EMAIL)
-    page.fill('input[name="password"]', PASSWORD)
-    page.click('input[type="submit"]')
-    wait_for_cookies(page.context)
-    cookies = page.context.cookies()
-    cookie_dict = {c["name"]: c["value"] for c in cookies}
+        # wait for cookies (you need async version of your function)
+        await wait_for_cookies(context)
 
-    browser.close()
+        cookies = await context.cookies()
+        cookie_dict = {c["name"]: c["value"] for c in cookies}
+        print(cookie_dict)
+        await browser.close()
 
 
 def getDungeonId(dungeon,soup):
@@ -90,11 +106,13 @@ def getDungeonId(dungeon,soup):
     return id_value
 
 
-def queue_warning(username,time,node,match_no):
-    message ="⚠️ You did more damage than allowed!"
-   
-    warnings[username] = message
-
+def queue_warning(attacker, node, match_no, threshold_time_str):
+    message = (
+        f"⚠️ You attacked the __**{node_names[node]}**__ {num_map[match_no]} Army "
+        f"before __**{threshold_time_str}**__ and dealt {attacker.get('damage_dealt')} damage "
+        f"at {attacker.get('last_action_at')}"
+    )
+    warnings[attacker.get("username")] = message
 
 def parse_time(ts):
     return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
@@ -102,27 +120,27 @@ def parse_time(ts):
 def updateMap(name,dmg,last_action,attacker_map):
     new_time = parse_time(last_action)
     if dmg == 0:
-        return
+        return False
     if name not in attacker_map:
-        queue_warning(name,last_action,0,0)
         print(f"⚠️ New attacker: {name}, damage={dmg}, last_action={last_action}")
         attacker_map[name] = {"damage": dmg, "last_action": last_action}
+        return True
     else:
         old = attacker_map[name]
         old_dmg = old["damage"]
         old_time = parse_time(old["last_action"])
         if dmg > old_dmg and new_time > old_time:
-            queue_warning(name,last_action,0,0)
             print(f"⚠️ Updated attacker: {name}, dmg {old_dmg}→{dmg}, last_action {old_time}→{last_action}")
             attacker_map[name] = {"damage": dmg, "last_action": last_action}
+            return True
+    return False
 
 
 
 def getAttackers(threshold_time_str,node_id,dungeon_map,cube_id):
     threshold_time = datetime.strptime(threshold_time_str, "%H:%M:%S").time()
     max_match_no = match_number[node_id]
-    for match_no in range(1,max_match_no+1):
-        match_no=str(match_no)
+    for match_no in map(str, range(1, max_match_no + 1)):
         STATS_URL = "https://demonicscans.org/guild_dungeon_cube_army_action.php"
         data = {
             "action": "contributors",
@@ -146,51 +164,45 @@ def getAttackers(threshold_time_str,node_id,dungeon_map,cube_id):
             last_action_time = datetime.strptime(last_action_str, "%Y-%m-%d %H:%M:%S").time()
             
             if last_action_time < threshold_time:
-                updateMap(attacker.get("username"),attacker.get("damage_dealt"),last_action_str,match_map)
+                if updateMap(attacker.get("username"),attacker.get("damage_dealt"),last_action_str,match_map):
+                    queue_warning(attacker,node_id,match_no,threshold_time_str)
+
         dungeon_map[match_no]=match_map
     
     return dungeon_map
 
     
-url = "https://demonicscans.org/guild_dungeon.php"
-
-res = requests.get(url, cookies=cookie_dict)
 
 
-soup = BeautifulSoup(res.text, "html.parser")
 
-MAP_FILE = "map.json"
 
-try:
-    with open(MAP_FILE, "r") as f:
-        dungeon_map = json.load(f)
-except FileNotFoundError:
-    dungeon_map = {}
+async def run_task():
+    global dungeon_map
+    global cookie_dict
+    await getCookies()
+    url = "https://demonicscans.org/guild_dungeon.php"
+    res = requests.get(url, cookies=cookie_dict)
+    soup = BeautifulSoup(res.text, "html.parser")
+    cube_id = getDungeonId(CUBE,soup)
+    if cube_id == -1:
+        return
+    if "dungeon_id" not in dungeon_map or  dungeon_map["dungeon_id"] != cube_id:
+        dungeon_map={}
 
-cube_id = getDungeonId(CUBE,soup)
-if cube_id == -1:
-    sys.exit(0)
-if "dungeon_id" not in dungeon_map or  dungeon_map["dungeon_id"] != cube_id:
-    dungeon_map={}
+    result_map ={}
+    result_map["dungeon_id"]=cube_id
+    for node_id in nodes:
+        if node_id in dungeon_map:
+            node_map = dungeon_map[node_id]
+        else:
+            node_map={}
+        threshold_time_str = nodes[node_id]
+        node_map = getAttackers(threshold_time_str,node_id,node_map,cube_id)
+        result_map[node_id] = node_map
+    dungeon_map=result_map
 
-result_map ={}
-result_map["dungeon_id"]=cube_id
-for node_id in nodes:
-    if node_id in dungeon_map:
-        node_map = dungeon_map[node_id]
-    else:
-        node_map={}
-    threshold_time_str = nodes[node_id]
-    node_map = getAttackers(threshold_time_str,node_id,node_map,cube_id)
-    result_map[node_id] = node_map
-with open(MAP_FILE, "w") as f:
-    json.dump(result_map, f, indent=2)  
 
-intents = discord.Intents.default()
-intents.message_content=True
-intents.members=True
 
-bot = commands.Bot(command_prefix="!",intents=intents)
 
 
 async def issue_warning(username, msg):
@@ -199,7 +211,6 @@ async def issue_warning(username, msg):
 
     discord_name =username
     user_id = None
-    print(guild.members)
     if discord_name:
         for member in guild.members:
             display_name = member.nick if member.nick else member.global_name or member.name
@@ -210,18 +221,60 @@ async def issue_warning(username, msg):
     if user_id:
         mention = f"<@{user_id}>"
     else:
-        mention = f"@{username}"  # fallback if ID not found
+        mention = f"__**@{username}**__"  # fallback if ID not found
 
     message = f"{mention} {msg}"
     await channel.send(message)
 
+
+intents = discord.Intents.default()
+intents.message_content=True
+intents.members=True
+
+bot = commands.Bot(command_prefix="!",intents=intents)
+
+@tasks.loop(minutes=1)
+async def dungeon_task():
+    global warnings
+    print("Running dungeon check...")
+    await run_task()
+    for username in warnings:
+        await issue_warning(username,warnings[username])
+    warnings=[]
+
+@dungeon_task.before_loop
+async def before_task():
+    await bot.wait_until_ready()
+
+@bot.command()
+async def run(ctx):
+    if not dungeon_task.is_running():
+        global GUILD_ID 
+        global CHANNEL_ID 
+        GUILD_ID = ctx.guild.id
+        CHANNEL_ID = ctx.channel.id
+
+        dungeon_task.start()
+        await ctx.send("✅ Dungeon task started!")
+    else:
+        await ctx.send("⚠️ Task is already running!")
+@bot.command()
+async def stop(ctx):
+    if dungeon_task.is_running():
+        dungeon_task.stop()
+        await ctx.send("🛑 Dungeon task stopped!")
+    else:
+        await ctx.send("⚠️ Task is not running!")
+
+@bot.command()
+async def clear(ctx):
+    global dungeon_map
+    dungeon_map={}
+    await ctx.send("⚠️ Data Cleared!")
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-    for username in warnings:
-        await issue_warning(username,warnings[username])
 
-    # Close bot after sending messages (useful for GitHub Actions)
-    await bot.close()
 
 bot.run(TOKEN)
