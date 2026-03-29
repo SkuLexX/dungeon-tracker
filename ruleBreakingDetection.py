@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timedelta
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 import re
 import logging
 import webserver
@@ -66,6 +67,9 @@ match_number = {
 }
 cookie_dict=json.loads(os.environ["COOKIES"])
 loop_time = int(os.environ["LOOP_TIME"]) or 10
+GUILD_ID = int(os.environ["GUILD_ID"])  # your server ID
+guild = discord.Object(id=GUILD_ID)
+
 warnings = {}
 
 
@@ -217,6 +221,7 @@ def getFirstShadowArmyAttack(cube_id):
     min_date = min(attackDates) if attackDates else getGameTime()
     return min_date
 
+
 async def run_task():
     global dungeon_map
     global cookie_dict
@@ -295,7 +300,7 @@ intents = discord.Intents.default()
 intents.message_content=True
 intents.members=True
 
-bot = commands.Bot(command_prefix="!",intents=intents)
+bot = commands.Bot(command_prefix="None",intents=intents)
 
 @tasks.loop(minutes=loop_time)
 async def dungeon_task():
@@ -313,88 +318,107 @@ async def dungeon_task():
 async def before_task():
     await bot.wait_until_ready()
 
-@bot.command()
-async def run(ctx):
+@bot.tree.command(name="run", description="Start the dungeon task", guild=guild)
+async def run(interaction: discord.Interaction):
     if not dungeon_task.is_running():
         global GUILD_ID 
         global CHANNEL_ID 
-        GUILD_ID = ctx.guild.id
-        CHANNEL_ID = ctx.channel.id
+        GUILD_ID = interaction.guild.id
+        CHANNEL_ID = interaction.channel.id
 
         dungeon_task.start()
-        await ctx.send("✅ Dungeon task started!")
+        await interaction.response.send_message("✅ Dungeon task started!")
     else:
-        await ctx.send("⚠️ Task is already running!")
-@bot.command()
-async def stop(ctx):
+        await interaction.response.send_message("⚠️ Task is already running!")
+
+@bot.tree.command(name="stop", description="Stop the dungeon task", guild=guild)
+async def stop(interaction: discord.Interaction):
     if dungeon_task.is_running():
         dungeon_task.stop()
-        await ctx.send("🛑 Dungeon task stopped!")
+        await interaction.response.send_message("🛑 Dungeon task stopped!")
     else:
-        await ctx.send("⚠️ Task is not running!")
-
-@bot.command()
-async def clear(ctx):
+        await interaction.response.send_message("⚠️ Task is not running!")
+        
+@bot.tree.command(name="status", description="Check if the dungeon task loop is running", guild=guild)
+async def status(interaction: discord.Interaction):
+    if dungeon_task.is_running():
+        await interaction.response.send_message("✅ The dungeon task is currently running!")
+    else:
+        await interaction.response.send_message("⚠️ The dungeon task is NOT running.")
+        
+@bot.tree.command(name="clear", description="Clear dungeon data", guild=guild)
+async def clear(interaction: discord.Interaction):
     global dungeon_map
-    dungeon_map={}
-    await ctx.send("⚠️ Data Cleared!")
-@bot.command()
-async def set_second_node_time(ctx, time_str: str):
+    dungeon_map = {}
+    await interaction.response.send_message("⚠️ Data Cleared!")
+
+@bot.tree.command(name="set_second_node_time", description="Set attack time for second node (ID 6)", guild=guild)
+@app_commands.describe(time_str="Time in HH:MM:SS format")
+async def set_second_node_time(interaction: discord.Interaction, time_str: str):
     if not is_valid_time_format(time_str):
-        await ctx.send("❌ Invalid format. Use HH:MM:SS (example: 18:00:00)")
+        await interaction.response.send_message("❌ Invalid format. Use HH:MM:SS (example: 18:00:00)")
         return
 
     nodes["6"] = time_str
     save_nodes()
-    await ctx.send(f"✅ Second node (6) attack time set to {time_str}")
+    await interaction.response.send_message(f"✅ Second node (6) attack time set to {time_str}")
 
-# -------------------------------
-# Command: set node 11 time
-# -------------------------------
-@bot.command()
-async def set_last_node_time(ctx, time_str: str):
+@bot.tree.command(name="set_last_node_time", description="Set attack time for last node (ID 11)", guild=guild)
+@app_commands.describe(time_str="Time in HH:MM:SS format")
+async def set_last_node_time(interaction: discord.Interaction, time_str: str):
     if not is_valid_time_format(time_str):
-        await ctx.send("❌ Invalid format. Use HH:MM:SS (example: 18:00:00)")
+        await interaction.response.send_message("❌ Invalid format. Use HH:MM:SS (example: 18:00:00)")
         return
 
     nodes["11"] = time_str
     save_nodes()
-    await ctx.send(f"✅ Last node (11) attack time set to {time_str}")
+    await interaction.response.send_message(f"✅ Last node (11) attack time set to {time_str}")
 
-@bot.command()
-async def get_node_times(ctx):
+@bot.tree.command(name="get_node_times", description="Display all node attack times", guild=guild)
+async def get_node_times(interaction: discord.Interaction):
     message = "📊 **Current Node Attack Times:**\n\n"
-
     for node_id, time_value in nodes.items():
         node_name = node_names.get(node_id, "Unknown Node")
         message += f"• **{node_name} (ID: {node_id})** → `{time_value}`\n"
+    await interaction.response.send_message(message)
 
-    await ctx.send(message)
-
-@bot.command()
-async def set_interval(ctx, minutes: int):
+@bot.tree.command(name="set_interval", description="Set the dungeon task loop interval in minutes", guild=guild)
+@app_commands.describe(minutes="Minutes for the loop interval (must be > 0)")
+async def set_interval(interaction: discord.Interaction, minutes: int):
     if minutes <= 0:
-        await ctx.send("❌ Interval must be > 0")
+        await interaction.response.send_message("❌ Interval must be > 0")
         return
 
     if dungeon_task.is_running():
         dungeon_task.change_interval(minutes=minutes)
+        await interaction.response.send_message(f"⏱️ Loop interval set to {minutes} minute(s)")
     else:
-        await ctx.send(f"⏱️ Task must be running to change loop interval")
+        await interaction.response.send_message("⏱️ Task must be running to change loop interval")
 
-    await ctx.send(f"⏱️ Loop interval set to {minutes} minute(s)")
-
-@bot.command()
-async def get_interval(ctx):
+@bot.tree.command(name="get_interval", description="Get the current dungeon loop interval", guild=guild)
+async def get_interval(interaction: discord.Interaction):
     if dungeon_task.is_running():
-        interval_minutes = dungeon_task.minutes  # If your loop was defined with minutes
-        await ctx.send(f"⏱️ Current loop interval is {interval_minutes} minute(s)")
+        interval_minutes = dungeon_task.minutes
+        await interaction.response.send_message(f"⏱️ Current loop interval is {interval_minutes} minute(s)")
     else:
-        await ctx.send("⚠️ The task is not currently running")
+        await interaction.response.send_message("⚠️ The task is not currently running")
+
+@bot.tree.command(name="help", description="Show all bot commands", guild=guild)
+async def help_command(interaction: discord.Interaction):
+    message = "📌 **Available Commands:**\n"
+
+    # Use get_commands(guild=guild) to only include your guild commands
+    guild_commands = bot.tree.get_commands(guild=guild)
+    for command in guild_commands:
+        # Only include commands that have a description (skip hidden/invalid ones)
+        if command.description:
+            message += f"/{command.name} - {command.description}\n"
+
+    await interaction.response.send_message(message, ephemeral=True)
 @bot.event
 async def on_ready():
+    await bot.tree.sync(guild=guild)  # fast guild sync
     logger.info(f"Logged in as {bot.user}")
-
 
 webserver.keep_alive()
 bot.run(TOKEN)
