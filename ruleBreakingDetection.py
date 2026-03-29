@@ -15,6 +15,16 @@ import webserver
 
 logging.basicConfig(level=logging.INFO)  # or DEBUG for more detail
 logger = logging.getLogger(__name__)
+game_offset = timedelta(hours=5, minutes=30)
+
+df_settings = {
+    "node": {
+        "6": "12:00:00",
+        "11": "18:00:00"
+    },
+    "dungeon_news_channel_id": os.environ["DUNGEON_NEWS_CHANNEL_ID"],
+    "notification_role_id": os.environ["NOTIFICATION_ROLE_ID"]
+}
 
 num_map = {
     "1": "first",
@@ -25,8 +35,8 @@ num_map = {
 MAP_FILE=os.environ["MAP_FILE"]
 SETTINGS_FILE =os.environ["SETTINGS_FILE"]
 node_names = {
-    "6": "second node",
-    "11": "last node",
+    "6": "Second Node",
+    "11": "Last Node",
 }
 STATS_URL = "https://demonicscans.org/guild_dungeon_cube_army_action.php"
 FIRST_NODE = "5"
@@ -44,12 +54,17 @@ except FileNotFoundError:
 
 try:
     with open(SETTINGS_FILE, "r") as f:
-        nodes = json.load(f)
+        settings = json.load(f)
 except FileNotFoundError:
-    nodes = {
-        "6": "12:00:00",
-        "11": "18:00:00"
-    }
+    settings={}
+
+settings = {**df_settings, **settings}
+
+nodes = settings.get("nodes")
+dungeon_news_channel_id=settings.get("dungeon_news_channel_id")
+notification_role_id=settings.get("notification_role_id")
+
+
 
 actual_node_times={}
 TOKEN = os.environ["BOT_TOKEN"]
@@ -199,12 +214,8 @@ def normalize_name(name):
     name = re.sub(r"[-_.]", "", name)
     return name.lower().strip()
 
-def getGameTime():
+def get_game_time():
     utc_now = datetime.utcnow()
-
-    # Game server offset (UTC +5:30)
-    game_offset = timedelta(hours=5, minutes=30)
-
     # Current game time
     game_time_now = utc_now + game_offset
 
@@ -214,11 +225,18 @@ def getGameTime():
     logger.info(f"Game time now : {game_time_str}")
     return game_time_str
 
+def compare_times(t1: str, t2: str) -> bool:
+    fmt = "%Y-%m-%d %H:%M:%S"
+    dt1 = datetime.strptime(t1, fmt).replace(second=0)
+    dt2 = datetime.strptime(t2, fmt).replace(second=0)
+    return dt1 == dt2
+
+
 def getFirstShadowArmyAttack(cube_id):
     attackDates = []
     for match_no in map(str, range(1, FIRST_NODE_MATCH_NO + 1)):
         attackDates.extend([player["joined_at"] for player in getAttackers(FIRST_NODE,cube_id,match_no)])
-    min_date = min(attackDates) if attackDates else getGameTime()
+    min_date = min(attackDates) if attackDates else get_game_time()
     return min_date
 
 
@@ -240,7 +258,7 @@ async def run_task():
     
     open_date = dungeon_map["open_date"]
     logger.info(f"open_date : {open_date}")
-    getGameTime()
+    get_game_time()
     for node in nodes:
         actual_node_times[node]=combine_date_and_time(open_date,nodes[node])
     logger.info(f"node-times : {actual_node_times}")
@@ -292,9 +310,9 @@ def is_valid_time_format(time_str):
     pattern = r"^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$"
     return re.match(pattern, time_str) is not None
 
-def save_nodes():
+def save_settings():
     with open(SETTINGS_FILE, "w") as f:
-        json.dump(nodes, f, indent=2)
+        json.dump(settings, f, indent=2)
 
 intents = discord.Intents.default()
 intents.message_content=True
@@ -327,24 +345,24 @@ async def run(interaction: discord.Interaction):
         CHANNEL_ID = interaction.channel.id
 
         dungeon_task.start()
-        await interaction.response.send_message("✅ Dungeon task started!")
+        await interaction.response.send_message("✅ Dungeon task started!", ephemeral=True)
     else:
-        await interaction.response.send_message("⚠️ Task is already running!")
+        await interaction.response.send_message("⚠️ Task is already running!", ephemeral=True)
 
 @bot.tree.command(name="stop", description="Stop the dungeon task", guild=guild)
 async def stop(interaction: discord.Interaction):
     if dungeon_task.is_running():
         dungeon_task.stop()
-        await interaction.response.send_message("🛑 Dungeon task stopped!")
+        await interaction.response.send_message("🛑 Dungeon task stopped!", ephemeral=True)
     else:
-        await interaction.response.send_message("⚠️ Task is not running!")
+        await interaction.response.send_message("⚠️ Task is not running!", ephemeral=True)
 
 @bot.tree.command(name="status", description="Check if the dungeon task loop is running", guild=guild)
 async def status(interaction: discord.Interaction):
     if dungeon_task.is_running():
-        await interaction.response.send_message("✅ The dungeon task is currently running!")
+        await interaction.response.send_message("✅ The dungeon task is currently running!", ephemeral=True)
     else:
-        await interaction.response.send_message("⚠️ The dungeon task is NOT running.")
+        await interaction.response.send_message("⚠️ The dungeon task is NOT running.", ephemeral=True)
         
 @bot.tree.command(name="clear", description="Clear dungeon data", guild=guild)
 async def clear(interaction: discord.Interaction):
@@ -356,23 +374,23 @@ async def clear(interaction: discord.Interaction):
 @app_commands.describe(time_str="Time in HH:MM:SS format")
 async def set_second_node_time(interaction: discord.Interaction, time_str: str):
     if not is_valid_time_format(time_str):
-        await interaction.response.send_message("❌ Invalid format. Use HH:MM:SS (example: 18:00:00)")
+        await interaction.response.send_message("❌ Invalid format. Use HH:MM:SS (example: 18:00:00)", ephemeral=True)
         return
 
     nodes["6"] = time_str
-    save_nodes()
-    await interaction.response.send_message(f"✅ Second node (6) attack time set to {time_str}")
+    save_settings()
+    await interaction.response.send_message(f"✅ Second node (6) attack time set to {time_str}", ephemeral=True)
 
 @bot.tree.command(name="set_last_node_time", description="Set attack time for last node (ID 11)", guild=guild)
 @app_commands.describe(time_str="Time in HH:MM:SS format")
 async def set_last_node_time(interaction: discord.Interaction, time_str: str):
     if not is_valid_time_format(time_str):
-        await interaction.response.send_message("❌ Invalid format. Use HH:MM:SS (example: 18:00:00)")
+        await interaction.response.send_message("❌ Invalid format. Use HH:MM:SS (example: 18:00:00)", ephemeral=True)
         return
 
     nodes["11"] = time_str
-    save_nodes()
-    await interaction.response.send_message(f"✅ Last node (11) attack time set to {time_str}")
+    save_settings()
+    await interaction.response.send_message(f"✅ Last node (11) attack time set to {time_str}", ephemeral=True)
 
 @bot.tree.command(name="get_node_times", description="Display all node attack times", guild=guild)
 async def get_node_times(interaction: discord.Interaction):
@@ -380,28 +398,28 @@ async def get_node_times(interaction: discord.Interaction):
     for node_id, time_value in nodes.items():
         node_name = node_names.get(node_id, "Unknown Node")
         message += f"• **{node_name} (ID: {node_id})** → `{time_value}`\n"
-    await interaction.response.send_message(message)
+    await interaction.response.send_message(message, ephemeral=True)
 
 @bot.tree.command(name="set_interval", description="Set the dungeon task loop interval in minutes", guild=guild)
 @app_commands.describe(minutes="Minutes for the loop interval (must be > 0)")
 async def set_interval(interaction: discord.Interaction, minutes: int):
     if minutes <= 0:
-        await interaction.response.send_message("❌ Interval must be > 0")
+        await interaction.response.send_message("❌ Interval must be > 0", ephemeral=True)
         return
 
     if dungeon_task.is_running():
         dungeon_task.change_interval(minutes=minutes)
-        await interaction.response.send_message(f"⏱️ Loop interval set to {minutes} minute(s)")
+        await interaction.response.send_message(f"⏱️ Loop interval set to {minutes} minute(s)", ephemeral=True)
     else:
-        await interaction.response.send_message("⏱️ Task must be running to change loop interval")
+        await interaction.response.send_message("⏱️ Task must be running to change loop interval", ephemeral=True)
 
 @bot.tree.command(name="get_interval", description="Get the current dungeon loop interval", guild=guild)
 async def get_interval(interaction: discord.Interaction):
     if dungeon_task.is_running():
         interval_minutes = dungeon_task.minutes
-        await interaction.response.send_message(f"⏱️ Current loop interval is {interval_minutes} minute(s)")
+        await interaction.response.send_message(f"⏱️ Current loop interval is {interval_minutes} minute(s)", ephemeral=True)
     else:
-        await interaction.response.send_message("⚠️ The task is not currently running")
+        await interaction.response.send_message("⚠️ The task is not currently running", ephemeral=True)
 
 @bot.tree.command(name="help", description="Show all bot commands", guild=guild)
 async def help_command(interaction: discord.Interaction):
@@ -415,9 +433,30 @@ async def help_command(interaction: discord.Interaction):
             message += f"/{command.name} - {command.description}\n"
 
     await interaction.response.send_message(message, ephemeral=True)
+
+
+
+@tasks.loop(minutes=1)
+async def scheduled_message():
+    game_time=get_game_time()
+    for node_id in nodes:
+        if compare_times(actual_node_times[node_id]==game_time):
+            channel = bot.get_channel(dungeon_news_channel_id)
+            if channel:
+                role = guild.get_role(notification_role_id) if notification_role_id else None
+                role_mention = role.mention if role else "@everyone"
+                await channel.send(f"{role_mention} Attack {node_names[node_id]} Shadow Army!")
+
+@scheduled_message.before_loop
+async def before_scheduled():
+    await bot.wait_until_ready()
+
+# Start it when bot is ready
+
 @bot.event
 async def on_ready():
     await bot.tree.sync(guild=guild)  # fast guild sync
+    scheduled_message.start()
     logger.info(f"Logged in as {bot.user}")
 
 webserver.keep_alive()
