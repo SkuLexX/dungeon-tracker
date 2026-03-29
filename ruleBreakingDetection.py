@@ -61,14 +61,22 @@ try:
     with open(STATUS_FILE, "r") as f:
         dungeon_status = json.load(f)
 except FileNotFoundError:
-    dungeon_status = {}
+    dungeon_status = {
+        "The Polyhedral Crucible": "-1",
+        "Castle of the Fallen Prince": "-1",
+        "Shadowbridge Warrens": "-1"
+    }
 
 
 try:
     with open(BOSS_STATUS_FILE, "r") as f:
         boss_status = {k: bool(v) for k, v in json.load(f).items()}
 except FileNotFoundError:
-    boss_status = {}
+    boss_status = {
+        "The Polyhedral Crucible": False,
+        "Castle of the Fallen Prince": False,
+        "Shadowbridge Warrens": False
+    }
 
 try:
     with open(SETTINGS_FILE, "r") as f:
@@ -554,8 +562,6 @@ async def check_dungeon_status():
         url = f"https://demonicscans.org/guild_dungeon_location.php?instance_id={new_id}&location_id={d['boss_location_id']}"
 
         # --- Dungeon status ---
-        save_dungeon_status = key not in dungeon_status
-        dungeon_status.setdefault(key, new_id)
         if new_id != dungeon_status[key]:
             save_dungeon_status = True
             await send_notification(d["dead_msg"] if new_id == "-1" else d["up_msg"])
@@ -564,8 +570,6 @@ async def check_dungeon_status():
         # --- Boss status ---
         if new_id != "-1":
             new_boss_status = get_status_is_ok(url)
-            save_boss_status = key not in boss_status
-            boss_status.setdefault(key, new_boss_status)
             if not boss_status[key] and new_boss_status:
                 await send_notification(d["boss_up_msg"])
                 await send_notification(f"Join Now {url}", False)
