@@ -18,12 +18,13 @@ logger = logging.getLogger(__name__)
 game_offset = timedelta(hours=5, minutes=30)
 
 df_settings = {
-    "node": {
+    "nodes": {
         "6": "12:00:00",
         "11": "18:00:00"
     },
     "dungeon_news_channel_id": os.environ["DUNGEON_NEWS_CHANNEL_ID"],
-    "notification_role_id": os.environ["NOTIFICATION_ROLE_ID"]
+    "notification_role_id": os.environ["NOTIFICATION_ROLE_ID"],
+    "gribs_nuke_time":"21:00:00"
 }
 
 num_map = {
@@ -33,6 +34,9 @@ num_map = {
     "4": "fourth"
 }
 MAP_FILE=os.environ["MAP_FILE"]
+STATUS_FILE=os.environ["STATUS_FILE"]
+BOSS_STATUS_FILE=os.environ["BOSS_STATUS_FILE"]
+
 SETTINGS_FILE =os.environ["SETTINGS_FILE"]
 node_names = {
     "6": "Second Node",
@@ -52,6 +56,20 @@ try:
 except FileNotFoundError:
     dungeon_map = {}
 
+
+try:
+    with open(STATUS_FILE, "r") as f:
+        dungeon_status = json.load(f)
+except FileNotFoundError:
+    dungeon_status = {}
+
+
+try:
+    with open(BOSS_STATUS_FILE, "r") as f:
+        boss_status = {k: bool(v) for k, v in json.load(f).items()}
+except FileNotFoundError:
+    boss_status = {}
+
 try:
     with open(SETTINGS_FILE, "r") as f:
         settings = json.load(f)
@@ -61,8 +79,11 @@ except FileNotFoundError:
 settings = {**df_settings, **settings}
 
 nodes = settings.get("nodes")
-dungeon_news_channel_id=settings.get("dungeon_news_channel_id")
-notification_role_id=settings.get("notification_role_id")
+dungeon_news_channel_id=int(settings.get("dungeon_news_channel_id"))
+notification_role_id=int(settings.get("notification_role_id"))
+gribs_nuke_time=settings.get("gribs_nuke_time")
+
+check_invalid_attacks=False
 
 
 
@@ -76,6 +97,30 @@ CUBE = "The Polyhedral Crucible"
 HARD = "Castle of the Fallen Prince"
 NORMAL = "Shadowbridge Warrens"
 
+DUNGEON_TYPES = [
+    {
+        "key": CUBE,
+        "boss_location_id": 14,
+        "dead_msg": "Cube Boss is DEAD",
+        "up_msg": "Cube Dungeon is UP",
+        "boss_up_msg": "Cube Boss is UP",
+    },
+    {
+        "key": HARD,
+        "boss_location_id": 10,
+        "dead_msg": "Hard Boss is DEAD",
+        "up_msg": "Hard Dungeon is UP",
+        "boss_up_msg": "Hard Boss is UP",
+    },
+    {
+        "key": NORMAL,
+        "boss_location_id": 5,
+        "dead_msg": "Normal Boss is DEAD",
+        "up_msg": "Normal Dungeon is UP",
+        "boss_up_msg": "Normal Boss is UP",
+    },
+]
+
 match_number = {
     "6":4,
     "11":1
@@ -87,8 +132,7 @@ guild = discord.Object(id=GUILD_ID)
 
 warnings = {}
 
-
-def getDungeonData(dungeon,soup):
+def get_dungeon_data(dungeon,soup,id_only=False):
     # Find first div.card that contains the text "The Polyhedral Crucible"
     card = None
     opened_date = None
@@ -100,15 +144,16 @@ def getDungeonData(dungeon,soup):
             break
 
     if card is None:
-        return -1    
+        return "-1"    
     enter_btn = card.find("a", string="Enter")
     
     if enter_btn is None:
-        return -1    
+        return "-1"    
     href = enter_btn["href"]
     parsed = urlparse(href)
     id_value = parse_qs(parsed.query)["id"][0]
-
+    if id_only:
+        return id_value
     span_warn = card.find("span", class_="tag warn")
     if span_warn:
         text = span_warn.get_text(strip=True)  # e.g., "Opened today @ 2026-03-29 00:15:21"
@@ -168,6 +213,7 @@ def getInvalidAttacks(threshold_date_str,node_id,node_map,cube_id):
     
     return node_map
 def combine_date_and_time(date_str, time_str):
+    date_str="2026-03-29 01:00:00"
     # Parse the original date
     date_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
     # Parse the new time
@@ -225,6 +271,16 @@ def get_game_time():
     logger.info(f"Game time now : {game_time_str}")
     return game_time_str
 
+def is_game_time(target: str) -> bool:
+    """target format: 'HH:MM:SS'"""
+    utc_now = datetime.utcnow()
+    game_time_now = utc_now + game_offset
+    
+    target_time = datetime.strptime(target, "%H:%M:%S").time()
+    
+    return game_time_now.time().replace(second=0, microsecond=0) == \
+           target_time.replace(second=0)
+
 def compare_times(t1: str, t2: str) -> bool:
     fmt = "%Y-%m-%d %H:%M:%S"
     dt1 = datetime.strptime(t1, fmt).replace(second=0)
@@ -239,15 +295,31 @@ def getFirstShadowArmyAttack(cube_id):
     min_date = min(attackDates) if attackDates else get_game_time()
     return min_date
 
+def update_node_times():
+    for node in nodes:
+        actual_node_times[node]=combine_date_and_time(dungeon_map["open_date"],nodes[node])
+    logger.info(f"node-times : {actual_node_times}")
+
+    
+def getDungeonCubeStatus():
+    soup = get_guild_dungeon_soup()
+    cube_id,open_date = get_dungeon_data(CUBE,soup)
+    return cube_id,open_date
+
+def get_guild_dungeon_soup():
+    url = "https://demonicscans.org/guild_dungeon.php"
+    return get_soup(url)
+
+def get_soup(url):
+    res = requests.get(url, cookies=cookie_dict)
+    soup = BeautifulSoup(res.text, "html.parser")
+    return soup
 
 async def run_task():
     global dungeon_map
     global cookie_dict
-    url = "https://demonicscans.org/guild_dungeon.php"
-    res = requests.get(url, cookies=cookie_dict)
-    soup = BeautifulSoup(res.text, "html.parser")
-    cube_id,open_date = getDungeonData(CUBE,soup)
-    if cube_id == -1:
+    cube_id,open_date = getDungeonCubeStatus()
+    if cube_id == "-1":
         return
     if "dungeon_id" not in dungeon_map or  dungeon_map["dungeon_id"] != cube_id: #new dungeon opened
         dungeon_map={}
@@ -258,22 +330,23 @@ async def run_task():
     
     open_date = dungeon_map["open_date"]
     logger.info(f"open_date : {open_date}")
-    get_game_time()
-    for node in nodes:
-        actual_node_times[node]=combine_date_and_time(open_date,nodes[node])
-    logger.info(f"node-times : {actual_node_times}")
+    update_node_times()
     result_map ={}
     result_map["dungeon_id"]=cube_id
     result_map["open_date"]=open_date
-    for node_id in nodes:
-        if node_id in dungeon_map:
-            node_map = dungeon_map[node_id]
-        else:
-            node_map={}
-        threshold_date_str = actual_node_times[node_id]
-        node_map = getInvalidAttacks(threshold_date_str,node_id,node_map,cube_id)
-        result_map[node_id] = node_map
-    dungeon_map=result_map
+    if check_invalid_attacks:
+        for node_id in nodes:
+            if node_id in dungeon_map:
+                node_map = dungeon_map[node_id]
+            else:
+                node_map={}
+            threshold_date_str = actual_node_times[node_id]
+            node_map = getInvalidAttacks(threshold_date_str,node_id,node_map,cube_id)
+            result_map[node_id] = node_map
+        dungeon_map=result_map
+    else:
+        dungeon_map["dungeon_id"]=cube_id
+        dungeon_map["open_date"]=open_date
 
 def set_dungeon_open_date(cube_id, open_date):
     if open_date is not None:
@@ -338,28 +411,30 @@ async def before_task():
 
 @bot.tree.command(name="run", description="Start the dungeon task", guild=guild)
 async def run(interaction: discord.Interaction):
-    if not dungeon_task.is_running():
+    global check_invalid_attacks
+    if not check_invalid_attacks:
         global GUILD_ID 
         global CHANNEL_ID 
         GUILD_ID = interaction.guild.id
         CHANNEL_ID = interaction.channel.id
 
-        dungeon_task.start()
+        check_invalid_attacks=True
         await interaction.response.send_message("✅ Dungeon task started!", ephemeral=True)
     else:
         await interaction.response.send_message("⚠️ Task is already running!", ephemeral=True)
 
 @bot.tree.command(name="stop", description="Stop the dungeon task", guild=guild)
 async def stop(interaction: discord.Interaction):
-    if dungeon_task.is_running():
-        dungeon_task.stop()
+    global check_invalid_attacks
+    if check_invalid_attacks:
+        check_invalid_attacks=False
         await interaction.response.send_message("🛑 Dungeon task stopped!", ephemeral=True)
     else:
         await interaction.response.send_message("⚠️ Task is not running!", ephemeral=True)
 
 @bot.tree.command(name="status", description="Check if the dungeon task loop is running", guild=guild)
 async def status(interaction: discord.Interaction):
-    if dungeon_task.is_running():
+    if check_invalid_attacks:
         await interaction.response.send_message("✅ The dungeon task is currently running!", ephemeral=True)
     else:
         await interaction.response.send_message("⚠️ The dungeon task is NOT running.", ephemeral=True)
@@ -368,6 +443,8 @@ async def status(interaction: discord.Interaction):
 async def clear(interaction: discord.Interaction):
     global dungeon_map
     dungeon_map = {}
+    with open(MAP_FILE, "w") as f:
+        json.dump(dungeon_map, f, indent=2)  
     await interaction.response.send_message("⚠️ Data Cleared!")
 
 @bot.tree.command(name="set_second_node_time", description="Set attack time for second node (ID 6)", guild=guild)
@@ -407,19 +484,26 @@ async def set_interval(interaction: discord.Interaction, minutes: int):
         await interaction.response.send_message("❌ Interval must be > 0", ephemeral=True)
         return
 
-    if dungeon_task.is_running():
-        dungeon_task.change_interval(minutes=minutes)
-        await interaction.response.send_message(f"⏱️ Loop interval set to {minutes} minute(s)", ephemeral=True)
-    else:
-        await interaction.response.send_message("⏱️ Task must be running to change loop interval", ephemeral=True)
+    dungeon_task.change_interval(minutes=minutes)
+    await interaction.response.send_message(f"⏱️ Loop interval set to {minutes} minute(s)", ephemeral=True)
 
 @bot.tree.command(name="get_interval", description="Get the current dungeon loop interval", guild=guild)
 async def get_interval(interaction: discord.Interaction):
-    if dungeon_task.is_running():
-        interval_minutes = dungeon_task.minutes
-        await interaction.response.send_message(f"⏱️ Current loop interval is {interval_minutes} minute(s)", ephemeral=True)
-    else:
-        await interaction.response.send_message("⚠️ The task is not currently running", ephemeral=True)
+    interval_minutes = dungeon_task.minutes
+    await interaction.response.send_message(f"⏱️ Current loop interval is {interval_minutes} minute(s)", ephemeral=True)
+
+@bot.tree.command(name="set_gribs_nuke_time", description="Set Nuke time for gribs", guild=guild)
+@app_commands.describe(time_str="Time in HH:MM:SS format")
+async def set_gribs_nuke_time(interaction: discord.Interaction, time_str: str):
+    global gribs_nuke_time
+    if not is_valid_time_format(time_str):
+        await interaction.response.send_message("❌ Invalid format. Use HH:MM:SS (example: 18:00:00)", ephemeral=True)
+        return
+
+    settings["gribs_nuke_time"] = time_str
+    gribs_nuke_time = time_str
+    save_settings()
+    await interaction.response.send_message(f"✅ Last node (11) attack time set to {time_str}", ephemeral=True)
 
 @bot.tree.command(name="help", description="Show all bot commands", guild=guild)
 async def help_command(interaction: discord.Interaction):
@@ -438,14 +522,80 @@ async def help_command(interaction: discord.Interaction):
 
 @tasks.loop(minutes=1)
 async def scheduled_message():
+    if("open_date" not in dungeon_map or dungeon_map["open_date"] is None):
+        return
     game_time=get_game_time()
-    for node_id in nodes:
-        if compare_times(actual_node_times[node_id]==game_time):
-            channel = bot.get_channel(dungeon_news_channel_id)
-            if channel:
-                role = guild.get_role(notification_role_id) if notification_role_id else None
-                role_mention = role.mention if role else "@everyone"
-                await channel.send(f"{role_mention} Attack {node_names[node_id]} Shadow Army!")
+    update_node_times()
+    for node_id in actual_node_times:
+        if compare_times(actual_node_times[node_id],game_time):
+            await send_notification(f"Attack {node_names[node_id]} Shadow Army!")
+
+async def send_notification(msg,mention=True):
+    channel = bot.get_channel(dungeon_news_channel_id)
+    if channel:
+        if mention:
+            guild = bot.get_guild(GUILD_ID)
+            role = guild.get_role(notification_role_id) if notification_role_id else None
+            role_mention = role.mention if role else "@everyone"
+            await channel.send(f"{role_mention} {msg}")
+        else:
+            await channel.send(msg)
+
+
+@tasks.loop(minutes=1)
+async def check_dungeon_status():
+    soup = get_guild_dungeon_soup()
+    save_dungeon_status = False
+    save_boss_status = False
+
+    for d in DUNGEON_TYPES:
+        key = d["key"]
+        new_id = get_dungeon_data(key, soup, True)
+        url = f"https://demonicscans.org/guild_dungeon_location.php?instance_id={new_id}&location_id={d['boss_location_id']}"
+
+        # --- Dungeon status ---
+        save_dungeon_status = key not in dungeon_status
+        dungeon_status.setdefault(key, new_id)
+        if new_id != dungeon_status[key]:
+            save_dungeon_status = True
+            await send_notification(d["dead_msg"] if new_id == "-1" else d["up_msg"])
+        dungeon_status[key] = new_id
+
+        # --- Boss status ---
+        if new_id != "-1":
+            new_boss_status = get_status_is_ok(url)
+            save_boss_status = key not in boss_status
+            boss_status.setdefault(key, new_boss_status)
+            if not boss_status[key] and new_boss_status:
+                await send_notification(d["boss_up_msg"])
+                await send_notification(f"Join Now {url}", False)
+            save_boss_status = boss_status[key]!=new_boss_status
+            boss_status[key] = new_boss_status
+
+    if save_dungeon_status:
+        with open(STATUS_FILE, "w") as f:
+            json.dump(dungeon_status, f, indent=2)
+
+    if save_boss_status:
+        with open(BOSS_STATUS_FILE, "w") as f:
+            json.dump(boss_status, f, indent=2)
+    
+    
+@tasks.loop(minutes=1)
+async def check_gribbs_status():
+    if(is_game_time(gribs_nuke_time)):
+        await send_notification("Nuke gribs")
+
+
+def get_status_is_ok(url):
+    res = requests.get(url, cookies=cookie_dict)
+    status = res.status_code
+    return status==200
+
+
+
+
+
 
 @scheduled_message.before_loop
 async def before_scheduled():
@@ -457,6 +607,9 @@ async def before_scheduled():
 async def on_ready():
     await bot.tree.sync(guild=guild)  # fast guild sync
     scheduled_message.start()
+    dungeon_task.start()
+    check_dungeon_status.start()
+    check_gribbs_status.start()
     logger.info(f"Logged in as {bot.user}")
 
 webserver.keep_alive()
