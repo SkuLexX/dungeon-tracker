@@ -22,8 +22,8 @@ num_map = {
     "3": "third",
     "4": "fourth"
 }
-MAP_FILE="map.json"
-SETTINGS_FILE ="settings.json"
+MAP_FILE=os.environ["MAP_FILE"]
+SETTINGS_FILE =os.environ["SETTINGS_FILE"]
 node_names = {
     "6": "second node",
     "11": "last node",
