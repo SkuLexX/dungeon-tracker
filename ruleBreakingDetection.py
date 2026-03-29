@@ -4,12 +4,13 @@ import os
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import discord
 from discord.ext import commands, tasks
 import re
 import logging
 import webserver
+
 
 logging.basicConfig(level=logging.INFO)  # or DEBUG for more detail
 logger = logging.getLogger(__name__)
@@ -26,6 +27,9 @@ node_names = {
     "6": "second node",
     "11": "last node",
 }
+STATS_URL = "https://demonicscans.org/guild_dungeon_cube_army_action.php"
+FIRST_NODE = "5"
+FIRST_NODE_MATCH_NO= 4
 
 if os.path.exists(".env"):
     load_dotenv()
@@ -46,7 +50,7 @@ except FileNotFoundError:
         "11": "18:00:00"
     }
 
-
+actual_node_times={}
 TOKEN = os.environ["BOT_TOKEN"]
 GUILD_ID  = None
 CHANNEL_ID = None
@@ -65,9 +69,11 @@ loop_time = int(os.environ["LOOP_TIME"]) or 10
 warnings = {}
 
 
-def getDungeonId(dungeon,soup):
+def getDungeonData(dungeon,soup):
     # Find first div.card that contains the text "The Polyhedral Crucible"
     card = None
+    opened_date = None
+
     for div in soup.find_all("div", class_="card"):
         header = div.find("div", class_="h")
         if header and dungeon in header.text:
@@ -83,7 +89,15 @@ def getDungeonId(dungeon,soup):
     href = enter_btn["href"]
     parsed = urlparse(href)
     id_value = parse_qs(parsed.query)["id"][0]
-    return id_value
+
+    span_warn = card.find("span", class_="tag warn")
+    if span_warn:
+        text = span_warn.get_text(strip=True)  # e.g., "Opened today @ 2026-03-29 00:15:21"
+        # Extract the datetime after the '@'
+        if "@" in text:
+            opened_date = text.split("@")[1].strip()  # "2026-03-29 00:15:21"
+
+    return id_value,opened_date
 
 
 def queue_warning(attacker, node, match_no, threshold_time_str):
@@ -115,43 +129,59 @@ def updateMap(name,dmg,last_action,attacker_map):
 
 
 
-def getAttackers(threshold_time_str,node_id,node_map,cube_id):
-    threshold_time = datetime.strptime(threshold_time_str, "%H:%M:%S").time()
+def getInvalidAttacks(threshold_date_str,node_id,node_map,cube_id):
     max_match_no = match_number[node_id]
     for match_no in map(str, range(1, max_match_no + 1)):
-        STATS_URL = "https://demonicscans.org/guild_dungeon_cube_army_action.php"
-        data = {
+        attackers = getAttackers(node_id, cube_id, match_no)
+        if match_no in node_map:
+            match_map=node_map[match_no]
+        else:
+            match_map={}
+
+        for attacker in attackers:
+            last_action_date_str = attacker.get("last_action_at")  # e.g., "2026-03-27 07:26:58"
+            
+            if last_action_date_str < threshold_date_str:
+                if updateMap(attacker.get("username"),attacker.get("damage_dealt"),last_action_date_str,match_map):
+                    queue_warning(attacker,node_id,match_no,threshold_date_str)
+
+        node_map[match_no]=match_map
+    
+    return node_map
+def combine_date_and_time(date_str, time_str):
+    # Parse the original date
+    date_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+    # Parse the new time
+    new_time_dt = datetime.strptime(time_str, "%H:%M:%S").time()
+    
+    # Combine date with new time
+    combined = datetime.combine(date_dt.date(), new_time_dt)
+    
+    # If the original time is later than the new time, move to next day
+    if date_dt.time() > new_time_dt:
+        combined += timedelta(days=1)
+    
+    return combined.strftime("%Y-%m-%d %H:%M:%S")
+
+def getAttackers(node_id, cube_id, match_no):
+    data = {
             "action": "contributors",
             "instance_id": cube_id,
             "node_id": node_id,
             "match_no":match_no
         }
-        res = requests.post(STATS_URL,data=data, cookies=cookie_dict)
+    res = requests.post(STATS_URL,data=data, cookies=cookie_dict)
 
 
 
-        json_data =res.text  # your full JSON here
+    json_data =res.text  # your full JSON here
 
-        data = json.loads(json_data)
-        if match_no in node_map:
-            match_map=node_map[match_no]
-        else:
-            match_map={}
-        if not data or not data.get("board"):
-            attackers=[]
-        else:
-            attackers=data.get("board").get("attackers", [])
-        for attacker in attackers:
-            last_action_str = attacker.get("last_action_at")  # e.g., "2026-03-27 07:26:58"
-            last_action_time = datetime.strptime(last_action_str, "%Y-%m-%d %H:%M:%S").time()
-            
-            if last_action_time < threshold_time:
-                if updateMap(attacker.get("username"),attacker.get("damage_dealt"),last_action_str,match_map):
-                    queue_warning(attacker,node_id,match_no,threshold_time_str)
-
-        node_map[match_no]=match_map
-    
-    return node_map
+    data = json.loads(json_data)
+    if not data or not data.get("board"):
+        attackers=[]
+    else:
+        attackers=data.get("board").get("attackers", [])
+    return attackers
 
     
 
@@ -165,29 +195,68 @@ def normalize_name(name: str) -> str:
     
     return name.lower()  # optional for comparison
 
+def getGameTime():
+    utc_now = datetime.utcnow()
+
+    # Game server offset (UTC +5:30)
+    game_offset = timedelta(hours=5, minutes=30)
+
+    # Current game time
+    game_time_now = utc_now + game_offset
+
+    # Format as YYYY-MM-DD HH:MM:SS
+    game_time_str = game_time_now.strftime("%Y-%m-%d %H:%M:%S")
+
+    logger.info(f"Game time now : {game_time_str}")
+    return game_time_str
+
+def getFirstShadowArmyAttack(cube_id):
+    attackDates = []
+    for match_no in map(str, range(1, FIRST_NODE_MATCH_NO + 1)):
+        attackDates.extend([player["joined_at"] for player in getAttackers(FIRST_NODE,cube_id,match_no)])
+    min_date = min(attackDates) if attackDates else getGameTime()
+    return min_date
+
 async def run_task():
     global dungeon_map
     global cookie_dict
     url = "https://demonicscans.org/guild_dungeon.php"
     res = requests.get(url, cookies=cookie_dict)
     soup = BeautifulSoup(res.text, "html.parser")
-    cube_id = getDungeonId(CUBE,soup)
+    cube_id,open_date = getDungeonData(CUBE,soup)
     if cube_id == -1:
         return
-    if "dungeon_id" not in dungeon_map or  dungeon_map["dungeon_id"] != cube_id:
+    if "dungeon_id" not in dungeon_map or  dungeon_map["dungeon_id"] != cube_id: #new dungeon opened
         dungeon_map={}
+        set_dungeon_open_date(cube_id, open_date)
+    if "open_date" not in dungeon_map:
+        set_dungeon_open_date(cube_id, open_date)
 
+    
+    open_date = dungeon_map["open_date"]
+    logger.info(f"open_date : {open_date}")
+    getGameTime()
+    for node in nodes:
+        actual_node_times[node]=combine_date_and_time(open_date,nodes[node])
+    logger.info(f"node-times : {actual_node_times}")
     result_map ={}
     result_map["dungeon_id"]=cube_id
+    result_map["open_date"]=open_date
     for node_id in nodes:
         if node_id in dungeon_map:
             node_map = dungeon_map[node_id]
         else:
             node_map={}
-        threshold_time_str = nodes[node_id]
-        node_map = getAttackers(threshold_time_str,node_id,node_map,cube_id)
+        threshold_date_str = actual_node_times[node_id]
+        node_map = getInvalidAttacks(threshold_date_str,node_id,node_map,cube_id)
         result_map[node_id] = node_map
     dungeon_map=result_map
+
+def set_dungeon_open_date(cube_id, open_date):
+    if open_date is not None:
+        dungeon_map["open_date"]=open_date
+    else:
+        dungeon_map["open_date"]= getFirstShadowArmyAttack(cube_id)
 
 
 
