@@ -190,14 +190,14 @@ def getAttackers(node_id, cube_id, match_no):
     
 
 
-def normalize_name(name: str) -> str:
-    # remove [demon] (any case)
-    name = re.sub(r"\[demon\]", "", name, flags=re.IGNORECASE)
-    
-    # normalize spaces
-    name = " ".join(name.split())
-    
-    return name.lower()  # optional for comparison
+def normalize_name(name):
+    # Remove tags like [tag]
+    name = re.sub(r"\[.*?\]", "", name, flags=re.IGNORECASE)
+    # Remove all spaces 
+    name = re.sub(r"\s+", "", name)
+    # Remove common separators
+    name = re.sub(r"[-_.]", "", name)
+    return name.lower().strip()
 
 def getGameTime():
     utc_now = datetime.utcnow()
@@ -338,7 +338,7 @@ async def stop(interaction: discord.Interaction):
         await interaction.response.send_message("🛑 Dungeon task stopped!")
     else:
         await interaction.response.send_message("⚠️ Task is not running!")
-        
+
 @bot.tree.command(name="status", description="Check if the dungeon task loop is running", guild=guild)
 async def status(interaction: discord.Interaction):
     if dungeon_task.is_running():
