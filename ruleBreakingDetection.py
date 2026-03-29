@@ -152,7 +152,7 @@ def get_dungeon_data(dungeon,soup,id_only=False):
             break
 
     if card is None:
-        return "-1"    
+        return "-2"    
     enter_btn = card.find("a", string="Enter")
     
     if enter_btn is None:
@@ -327,7 +327,7 @@ async def run_task():
     global dungeon_map
     global cookie_dict
     cube_id,open_date = getDungeonCubeStatus()
-    if cube_id == "-1":
+    if cube_id == "-1" or cube_id == "-2":
         return
     if "dungeon_id" not in dungeon_map or  dungeon_map["dungeon_id"] != cube_id: #new dungeon opened
         dungeon_map={}
@@ -559,6 +559,8 @@ async def check_dungeon_status():
     for d in DUNGEON_TYPES:
         key = d["key"]
         new_id = get_dungeon_data(key, soup, True)
+        if new_id=="-2":
+            continue
         url = f"https://demonicscans.org/guild_dungeon_location.php?instance_id={new_id}&location_id={d['boss_location_id']}"
 
         # --- Dungeon status ---
