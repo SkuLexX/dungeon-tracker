@@ -221,7 +221,6 @@ def getInvalidAttacks(threshold_date_str,node_id,node_map,cube_id):
     
     return node_map
 def combine_date_and_time(date_str, time_str):
-    date_str="2026-03-29 01:00:00"
     # Parse the original date
     date_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
     # Parse the new time
