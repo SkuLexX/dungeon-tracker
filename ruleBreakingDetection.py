@@ -23,7 +23,8 @@ df_settings = {
     },
     "dungeon_news_channel_id": os.environ["DUNGEON_NEWS_CHANNEL_ID"],
     "notification_role_id": os.environ["NOTIFICATION_ROLE_ID"],
-    "gribs_nuke_time":"21:00:00"
+    "gribs_nuke_time":"21:00:00",
+    "check_invalid_attacks":"True"
 }
 
 num_map = {
@@ -90,7 +91,7 @@ dungeon_news_channel_id=int(settings.get("dungeon_news_channel_id"))
 notification_role_id=int(settings.get("notification_role_id"))
 gribs_nuke_time=settings.get("gribs_nuke_time")
 
-check_invalid_attacks=False
+check_invalid_attacks=bool(settings.get("check_invalid_attacks"))
 
 
 
@@ -425,6 +426,8 @@ async def run(interaction: discord.Interaction):
         CHANNEL_ID = interaction.channel.id
 
         check_invalid_attacks=True
+        settings["check_invalid_attacks"]=True
+        save_settings()
         await interaction.response.send_message("✅ Dungeon task started!", ephemeral=True)
     else:
         await interaction.response.send_message("⚠️ Task is already running!", ephemeral=True)
@@ -434,6 +437,8 @@ async def stop(interaction: discord.Interaction):
     global check_invalid_attacks
     if check_invalid_attacks:
         check_invalid_attacks=False
+        settings["check_invalid_attacks"]=False
+        save_settings()
         await interaction.response.send_message("🛑 Dungeon task stopped!", ephemeral=True)
     else:
         await interaction.response.send_message("⚠️ Task is not running!", ephemeral=True)
