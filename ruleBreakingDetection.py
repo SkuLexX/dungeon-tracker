@@ -10,7 +10,6 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import re
 import logging
-import webserver
 
 
 logging.basicConfig(level=logging.INFO)  # or DEBUG for more detail
@@ -617,5 +616,4 @@ async def on_ready():
     check_gribbs_status.start()
     logger.info(f"Logged in as {bot.user}")
 
-webserver.keep_alive()
 bot.run(TOKEN)
