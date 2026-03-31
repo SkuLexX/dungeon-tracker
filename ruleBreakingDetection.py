@@ -548,9 +548,9 @@ async def scheduled_message():
 async def send_notification(msg,role_id = notification_role_id):
     channel = bot.get_channel(dungeon_news_channel_id)
     if channel:
-        if notification_role_id:
+        if role_id:
             guild = bot.get_guild(GUILD_ID)
-            role = guild.get_role(notification_role_id) if notification_role_id else None
+            role = guild.get_role(role_id) if role_id else None
             role_mention = role.mention if role else "@everyone"
             await channel.send(f"{role_mention} {msg}")
         else:
