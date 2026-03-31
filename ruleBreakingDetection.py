@@ -23,7 +23,9 @@ df_settings = {
     },
     "dungeon_news_channel_id": os.environ["DUNGEON_NEWS_CHANNEL_ID"],
     "notification_role_id": os.environ["NOTIFICATION_ROLE_ID"],
+    "management_role_id": os.environ["MANAGEMENT_ROLE_ID"],
     "gribs_nuke_time":"21:00:00",
+    "channel_id":os.environ["CHANNEL_ID"],
     "check_invalid_attacks":"True"
 }
 
@@ -89,6 +91,7 @@ settings = {**df_settings, **settings}
 nodes = settings.get("nodes")
 dungeon_news_channel_id=int(settings.get("dungeon_news_channel_id"))
 notification_role_id=int(settings.get("notification_role_id"))
+management_role_id=int(settings.get("management_role_id"))
 gribs_nuke_time=settings.get("gribs_nuke_time")
 
 check_invalid_attacks=bool(settings.get("check_invalid_attacks"))
@@ -97,8 +100,7 @@ check_invalid_attacks=bool(settings.get("check_invalid_attacks"))
 
 actual_node_times={}
 TOKEN = os.environ["BOT_TOKEN"]
-GUILD_ID  = None
-CHANNEL_ID = None
+CHANNEL_ID = int(settings.get("channel_id"))
 
 
 CUBE = "The Polyhedral Crucible"
@@ -427,6 +429,8 @@ async def run(interaction: discord.Interaction):
 
         check_invalid_attacks=True
         settings["check_invalid_attacks"]=True
+        settings["channel_id"]=CHANNEL_ID
+
         save_settings()
         await interaction.response.send_message("✅ Dungeon task started!", ephemeral=True)
     else:
@@ -541,10 +545,10 @@ async def scheduled_message():
         if compare_times(actual_node_times[node_id],game_time):
             await send_notification(f"Attack {node_names[node_id]} Shadow Army!")
 
-async def send_notification(msg,mention=True):
+async def send_notification(msg,role_id = notification_role_id):
     channel = bot.get_channel(dungeon_news_channel_id)
     if channel:
-        if mention:
+        if notification_role_id:
             guild = bot.get_guild(GUILD_ID)
             role = guild.get_role(notification_role_id) if notification_role_id else None
             role_mention = role.mention if role else "@everyone"
@@ -569,7 +573,10 @@ async def check_dungeon_status():
         # --- Dungeon status ---
         if new_id != dungeon_status[key]:
             save_dungeon_status = True
-            await send_notification(d["dead_msg"] if new_id == "-1" else d["up_msg"])
+            if new_id == "-1":
+                await send_notification(d["dead_msg"],management_role_id)
+            else:
+                await send_notification(d["up_msg"])
         dungeon_status[key] = new_id
 
         # --- Boss status ---
@@ -577,7 +584,7 @@ async def check_dungeon_status():
             new_boss_status = get_status_is_ok(url)
             if not boss_status[key] and new_boss_status:
                 await send_notification(d["boss_up_msg"])
-                await send_notification(f"Join Now {url}", False)
+                await send_notification(f"Join Now {url}", None)
             save_boss_status = boss_status[key]!=new_boss_status
             boss_status[key] = new_boss_status
 
