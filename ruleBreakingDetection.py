@@ -90,8 +90,8 @@ settings = {**df_settings, **settings}
 
 nodes = settings.get("nodes")
 dungeon_news_channel_id=int(settings.get("dungeon_news_channel_id"))
-notification_role_id=int(settings.get("notification_role_id"))
-management_role_id=int(settings.get("management_role_id"))
+notification_role_id=int(df_settings.get("notification_role_id"))
+management_role_id=int(df_settings.get("management_role_id"))
 gribs_nuke_time=settings.get("gribs_nuke_time")
 
 check_invalid_attacks=bool(settings.get("check_invalid_attacks"))
