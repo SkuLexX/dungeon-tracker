@@ -222,7 +222,7 @@ def getInvalidAttacks(threshold_date_str,node_id,node_map,cube_id):
         node_map[match_no]=match_map
     
     return node_map
-def combine_date_and_time(date_str, time_str):
+def combine_date_and_time(date_str, time_str,add_delta_var):
     # Parse the original date
     date_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
     # Parse the new time
@@ -232,10 +232,20 @@ def combine_date_and_time(date_str, time_str):
     combined = datetime.combine(date_dt.date(), new_time_dt)
     
     # If the original time is later than the new time, move to next day
-    if date_dt.time() > new_time_dt:
+    if add_delta_var:
         combined += timedelta(days=1)
     
     return combined.strftime("%Y-%m-%d %H:%M:%S")
+
+def add_delta(date_str, time_str):
+        # Parse the original date
+    date_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+    # Parse the new time
+    new_time_dt = datetime.strptime(time_str, "%H:%M:%S").time()
+        
+    # If the original time is later than the new time, move to next day
+    return date_dt.time() > new_time_dt
+        
 
 def getAttackers(node_id, cube_id, match_no):
     data = {
@@ -305,8 +315,12 @@ def getFirstShadowArmyAttack(cube_id):
     return min_date
 
 def update_node_times():
+    add_delta_var = False
     for node in nodes:
-        actual_node_times[node]=combine_date_and_time(dungeon_map["open_date"],nodes[node])
+        add_delta_var=add_delta_var or add_delta(dungeon_map["open_date"],nodes[node])
+
+    for node in nodes:
+        actual_node_times[node]=combine_date_and_time(dungeon_map["open_date"],nodes[node],add_delta_var)
     logger.info(f"node-times : {actual_node_times}")
 
     
