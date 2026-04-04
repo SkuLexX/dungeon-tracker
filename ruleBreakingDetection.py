@@ -156,16 +156,16 @@ def get_dungeon_data(dungeon,soup,id_only=False):
             break
 
     if card is None:
-        return "-2"    
+        return "-2",None    
     enter_btn = card.find("a", string="Enter")
     
     if enter_btn is None:
-        return "-1"    
+        return "-1",None    
     href = enter_btn["href"]
     parsed = urlparse(href)
     id_value = parse_qs(parsed.query)["id"][0]
     if id_only:
-        return id_value
+        return id_value,None
     span_warn = card.find("span", class_="tag warn")
     if span_warn:
         text = span_warn.get_text(strip=True)  # e.g., "Opened today @ 2026-03-29 00:15:21"
