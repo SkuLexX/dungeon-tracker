@@ -26,7 +26,8 @@ df_settings = {
     "management_role_id": os.environ["MANAGEMENT_ROLE_ID"],
     "gribs_nuke_time":"21:00:00",
     "channel_id":os.environ["CHANNEL_ID"],
-    "check_invalid_attacks":"True"
+    "check_invalid_attacks":"True",
+    "shadow_dmg_limit": os.environ["SHADOW_DMG_LIMIT"]
 }
 
 num_map = {
@@ -93,6 +94,7 @@ dungeon_news_channel_id=int(settings.get("dungeon_news_channel_id"))
 notification_role_id=int(df_settings.get("notification_role_id"))
 management_role_id=int(df_settings.get("management_role_id"))
 gribs_nuke_time=settings.get("gribs_nuke_time")
+shadow_dmg_limit=int(df_settings.get("shadow_dmg_limit"))
 
 check_invalid_attacks=bool(settings.get("check_invalid_attacks"))
 
@@ -214,8 +216,9 @@ def getInvalidAttacks(threshold_date_str,node_id,node_map,cube_id):
 
         for attacker in attackers:
             last_action_date_str = attacker.get("last_action_at")  # e.g., "2026-03-27 07:26:58"
+            attack_dmg = int(attacker.get("damage_dealt")) 
             
-            if last_action_date_str < threshold_date_str:
+            if last_action_date_str < threshold_date_str and attack_dmg > shadow_dmg_limit:
                 if updateMap(attacker.get("username"),attacker.get("damage_dealt"),last_action_date_str,match_map):
                     queue_warning(attacker,node_id,match_no,threshold_date_str)
 
