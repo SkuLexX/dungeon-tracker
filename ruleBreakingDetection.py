@@ -582,7 +582,7 @@ async def check_dungeon_status():
 
     for d in DUNGEON_TYPES:
         key = d["key"]
-        new_id = get_dungeon_data(key, soup, True)
+        new_id,_ = get_dungeon_data(key, soup, True)
         if new_id=="-2":
             continue
         url = f"https://demonicscans.org/guild_dungeon_location.php?instance_id={new_id}&location_id={d['boss_location_id']}"
@@ -598,7 +598,7 @@ async def check_dungeon_status():
 
         # --- Boss status ---
         if new_id != "-1":
-            new_boss_status = get_status_is_ok(url)
+            new_boss_status = get_boss_is_up(url)
             if not boss_status[key] and new_boss_status:
                 await send_notification(d["boss_up_msg"])
                 await send_notification(f"Join Now {url}", None)
@@ -620,10 +620,10 @@ async def check_gribbs_status():
         await send_notification("Nuke gribs")
 
 
-def get_status_is_ok(url):
+def get_boss_is_up(url):
     res = requests.get(url, cookies=cookie_dict)
-    status = res.status_code
-    return status==200
+    status = res.status_code    
+    return status==200 and "Boss is locked" not in res.text
 
 
 
